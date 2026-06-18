@@ -150,15 +150,15 @@ int State::evaluate(
                     // player=0: promotes at row 0; distance = r
                     // player=1: promotes at row BOARD_H-1; distance = BOARD_H-1-r
                     int dist = (this->player == 0) ? r : (BOARD_H - 1 - r);
-                    if(dist == 1) self_score += 80; //在幾步就可升變
-                    else if(dist == 2) self_score += 40;
-                    else if(dist == 3) self_score += 20;
+                    if(dist == 1) self_score += 60; //在幾步就可升變
+                    else if(dist == 2) self_score += 30;
+                    else if(dist == 3) self_score += 10;
                 }
                 if(oppn_board[r][c] == 1){
                     int dist = (this->player == 1) ? r : (BOARD_H - 1 - r);
-                    if(dist == 1) oppn_score += 80;
-                    else if(dist == 2) oppn_score += 40;
-                    else if(dist == 3) oppn_score += 20;
+                    if(dist == 1) oppn_score += 60;
+                    else if(dist == 2) oppn_score += 30;
+                    else if(dist == 3) oppn_score += 10;
                 }
             }
         }
