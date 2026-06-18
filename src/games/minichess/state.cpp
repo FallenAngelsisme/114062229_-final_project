@@ -97,6 +97,8 @@ int State::evaluate(
     auto self_board  = this->board.board[this->player];
     auto oppn_board  = this->board.board[1 - this->player];
     int self_score = 0, oppn_score = 0;
+    int self_kr = -1, self_kc = -1;
+    int oppn_kr = -1, oppn_kc = -1;
     /*
     為甚麼先use_kp_eva: 除了king距離，還算升變威脅
     接著看simple material
@@ -106,8 +108,7 @@ int State::evaluate(
     */
     if(use_kp_eval){ //use_kp_eva甚麼時候是true?  minimax.hpp 永遠是 true
         // [TODO 1-3] Find king positions
-        int self_kr = -1, self_kc = -1;
-        int oppn_kr = -1, oppn_kc = -1;
+        
         // 找到king == 6
         for(int r = 0; r < BOARD_H; r++){
             for(int c = 0; c < BOARD_W; c++){
@@ -198,7 +199,31 @@ int State::evaluate(
             }
         }
     }
-
+    if(this->step >= 70){
+        // 用比賽規則的子數計算
+        static const int endgame_val[7] = {0, 2, 6, 7, 8, 20, 0};
+        int self_end = 0, oppn_end = 0;
+        for(int r = 0; r < BOARD_H; r++){
+            for(int c = 0; c < BOARD_W; c++){
+                int sp = self_board[r][c];
+                int op = oppn_board[r][c];
+                if(sp > 0) self_end += endgame_val[sp];
+                if(op > 0) oppn_end += endgame_val[op];
+            }
+        }
+        // 殘局加重比子數的權重
+        int endgame_weight = (this->step - 70) * 2;
+        bonus += (self_end - oppn_end) * endgame_weight;
+    }
+    // 殘局時 King 應該主動進攻
+    if(this->step >= 75){
+        // 鼓勵我方 King 靠近敵方 King
+        if(self_kr >= 0 && oppn_kr >= 0){
+            int king_dist = std::abs(self_kr - oppn_kr) + 
+                            std::abs(self_kc - oppn_kc);
+            bonus += (7 - king_dist) * 10;
+        }
+    }
     return self_score - oppn_score + bonus;
 }
 
