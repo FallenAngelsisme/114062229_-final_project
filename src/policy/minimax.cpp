@@ -33,7 +33,10 @@ static TTEntry tt_table[TT_SIZE];
 static inline size_t tt_index(uint64_t hash){ return hash & (TT_SIZE - 1); } //& (TT_SIZE - 1) 是把 hash 限制在 0 ~ 4百萬之間，概念就像取餘數。
 
 static void tt_clear(){
-    std::memset(tt_table, 0, sizeof(tt_table));
+    //std::memset(tt_table, 0, sizeof(tt_table));
+    for(size_t i = 0; i < TT_SIZE; i++){
+        tt_table[i] = TTEntry{};
+    }
 }
 //查詢
 static const TTEntry* tt_probe(uint64_t hash){

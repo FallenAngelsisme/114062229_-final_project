@@ -194,7 +194,7 @@ int State::evaluate(
             int tc = (int)action.second.second;
             int cap = oppn_board[tr][tc]; //我這步走完之後，目標格上有沒有對手的棋子」，有的話就加分。
             if(cap > 0){
-                bonus += simple_material[cap];
+                bonus += simple_material[cap]/4;
             }
         }
     }
