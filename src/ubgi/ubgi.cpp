@@ -337,7 +337,7 @@ static void do_search(
             << " time " << elapsed_ms
             << " nps " << nps
             << " currmove " << move_to_str(upd.best_move)
-            << " currmovenumber " << (upd.move_index + 1);
+            << " currmovenumber " << upd.move_number;
         send(oss.str());
     };
 
