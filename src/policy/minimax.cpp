@@ -33,7 +33,6 @@ static TTEntry tt_table[TT_SIZE];
 static inline size_t tt_index(uint64_t hash){ return hash & (TT_SIZE - 1); } //& (TT_SIZE - 1) 是把 hash 限制在 0 ~ 4百萬之間，概念就像取餘數。
 
 static void tt_clear(){
-    //std::memset(tt_table, 0, sizeof(tt_table));
     for(size_t i = 0; i < TT_SIZE; i++){
         tt_table[i] = TTEntry{};
     }
@@ -54,6 +53,30 @@ static void tt_store(uint64_t hash, int score, int depth, TTFlag flag, const Mov
     e.flag      = flag;
     e.best_move = best;
     e.valid     = true;
+}
+
+
+/* ============================================================
+ * [NEW] Time Management
+ * search_types.hpp 不能修改，所以時間管理用 static 變數
+ * 在 minimax.cpp 內部自行管理，不依賴 SearchContext
+ * g_start_time    : 這步棋搜尋開始的時間點，在 search() 開頭設定
+ * g_time_limit_ms : 這步棋允許的最大搜尋時間（毫秒）
+ *   - 從 ctx.params["TimeLimit"] 讀取 CLI 傳入的 --time 參數
+ *   - 預設 1800ms，留 200ms 緩衝避免超時被判負
+ * ============================================================ */
+static std::chrono::steady_clock::time_point g_start_time; // [NEW]
+static long g_time_limit_ms = 1800;                         // [NEW]
+
+// [NEW] 回傳已經過的毫秒數，供 Iterative Deepening 判斷要不要開始下一層
+static long g_elapsed_ms(){
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - g_start_time).count();
+}
+
+// [NEW] 回傳是否超時，供 pvs() 定期呼叫
+static bool g_is_time_up(){
+    return g_elapsed_ms() >= g_time_limit_ms;
 }
 
 
@@ -188,6 +211,19 @@ static int pvs(
     ctx.nodes++;
     if(ply > ctx.seldepth) ctx.seldepth = ply; // 記錄最深到幾層
     if(ctx.stop) return 0; // 時間到，立刻停止，ctx.stop在哪裡可以判斷時間到
+
+    /* [NEW] 定期檢查時間
+     * 每 4096 個節點（0xFFF + 1）呼叫一次 g_is_time_up()
+     * 不是每個節點都查，避免 chrono 呼叫拖慢搜尋速度
+     * 原本只在 search() 的迴圈頭檢查時間，
+     * 導致某一層搜尋本身很深時，來不及停止而嚴重超時（例如跑了 93 秒）
+     * 這裡修正：pvs() 內部也會定期停止 */
+    if((ctx.nodes & 0xFFF) == 0){
+        if(g_is_time_up()){
+            ctx.stop = true;
+            return 0;
+        }
+    }
 
     /* === Lazy move generation === */ //先查TT → 命中就直接回傳，不用算合法步
     if(state->legal_actions.empty() && state->game_state == UNKNOWN){
@@ -363,6 +399,15 @@ SearchResult MiniMax::search(
     GameHistory& history,
     SearchContext& ctx
 ){
+    /* [NEW] 從 ctx.params 讀取 CLI 傳入的時間限制
+     * CLI --time 2000 會把 2000 存進 ctx.params["TimeLimit"]
+     * 留 200ms 緩衝確保不超時被判負
+     * 若 params 裡沒有 TimeLimit，預設用 1800ms */
+    long raw_time_ms = param_int(ctx.params, "TimeLimit", 2000); // [NEW]
+    g_time_limit_ms  = raw_time_ms - 200;                         // [NEW] 留 200ms 緩衝
+    if(g_time_limit_ms < 100) g_time_limit_ms = 100;              // [NEW] 至少 100ms
+    g_start_time = std::chrono::steady_clock::now();               // [NEW] 記錄開始時間
+
     ctx.reset(); // nodes=0, stop=false
     MMParams p = MMParams::from_map(ctx.params); // 讀取設定?
     SearchResult result;
@@ -378,22 +423,18 @@ SearchResult MiniMax::search(
 
     tt_clear();
 
-    // Time management
-    using Clock = std::chrono::steady_clock; //是 C++ 的計時器，不受系統時間影響，精確度高。
-    auto start_time = Clock::now();
-    auto time_limit_ms = 9000; // 9 seconds (leave 1s margin)
-    //time_elapsed_ms 是一個 lambda，每次呼叫都回傳「從開始到現在經過幾毫秒」。
-    auto time_elapsed_ms = [&]() -> long {
-        auto now = Clock::now();
-        return std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
-    };
+    // [NEW] depth=0 代表無限深度（助教說明：depth 0 時自動用無限深度）
+    // 設定一個很大的上限，實際上由時間限制決定搜幾層
+    int max_depth = (depth <= 0) ? 999 : depth; // [NEW]
 
     // Iterative deepening
-    int max_depth = depth;  // caller sets desired depth; we iterate up to it
-
+    // [MODIFIED] 原本用 start_time lambda，改用 g_start_time / g_elapsed_ms()
     for(int d = 1; d <= max_depth; d++){
         if(ctx.stop) break;
-        if(d > 1 && time_elapsed_ms() > time_limit_ms / 2){
+
+        /* [MODIFIED] 原本用 time_elapsed_ms()，改用 g_elapsed_ms()
+         * 邏輯不變：用了一半時間就不開始下一層 */
+        if(d > 1 && g_elapsed_ms() > g_time_limit_ms / 2){
             // Don't start a deeper iteration if we've used half the time
             break;
         }
@@ -416,7 +457,8 @@ SearchResult MiniMax::search(
         bool search_aborted = false;
 
         for(auto& action : root_moves){
-            if(ctx.stop || time_elapsed_ms() > time_limit_ms){
+            /* [MODIFIED] 原本用 time_elapsed_ms()，改用 g_elapsed_ms() */
+            if(ctx.stop || g_elapsed_ms() > g_time_limit_ms){
                 search_aborted = true;
                 break;
             }
