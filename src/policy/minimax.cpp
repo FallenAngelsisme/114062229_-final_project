@@ -279,6 +279,34 @@ static int pvs(
         return score;
     }
 
+    /* === Null Move Pruning ===
+     * 概念：如果「讓對手連下一步（我方 pass）」之後，
+     * 對手以 depth-3 搜尋仍然無法讓分數低於 beta，
+     * 代表這個局面對我方非常有利，可以直接剪枝回傳 beta。
+     *
+     * 條件限制（避免誤判）：
+     *   depth >= 3   : 深度太淺沒有意義
+     *   beta < P_MAX - 100 : 避免在「確定勝利」的局面誤剪
+     *   alpha > M_MAX + 100: 避免在「確定失敗」的局面誤剪
+     *   create_null_state() 成功 : 確認有合法的 pass 狀態
+     *
+     * 注意：不在殘局使用（zugzwang：有時候 pass 反而更差）
+     * 用 depth-3 而非 depth-2 是因為後面還有 quiescence，
+     * 實際搜尋深度不會太淺 */
+    if(depth >= 3 && beta < P_MAX - 100 && alpha > M_MAX + 100){
+        State* null_state = static_cast<State*>(state->create_null_state());
+        if(null_state){
+            history.push(h);
+            int null_score = -pvs(null_state, depth - 3, -beta, -beta + 1,
+                                  history, ply + 1, ctx, p);
+            history.pop(h);
+            delete null_state;
+            if(!ctx.stop && null_score >= beta){
+                return beta;  // Null move cutoff：局面對我方非常有利
+            }
+        }
+    }
+
     history.push(h);// 把當前盤面加進歷史記錄
 
     /* === Move ordering === */

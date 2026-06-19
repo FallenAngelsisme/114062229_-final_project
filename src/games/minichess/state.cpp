@@ -220,13 +220,16 @@ int State::evaluate(
         
         bonus += (self_end - oppn_end) * 5;
     }
-    // 殘局時 King 應該主動進攻
-    if(this->step >= 75){
-        // 鼓勵我方 King 靠近敵方 King
+    /* [MODIFIED] 殘局時 King 應該主動進攻
+     * 原本 step >= 75 才啟動，距結局只剩 25 步，太晚了
+     * 改為 step >= 55 開始，並隨 step 漸進式加強
+     * step=55 時 king_bonus=0, step=65 時 king_bonus=2, step=85 時 king_bonus=6 */
+    if(this->step >= 55){
         if(self_kr >= 0 && oppn_kr >= 0){
-            int king_dist = std::abs(self_kr - oppn_kr) + 
+            int king_dist = std::abs(self_kr - oppn_kr) +
                             std::abs(self_kc - oppn_kc);
-            bonus += (7 - king_dist) * 10;
+            int king_bonus = (this->step - 55) / 5; // 漸進式：每5步增加1
+            bonus += (7 - king_dist) * king_bonus;
         }
     }
     return self_score - oppn_score + bonus;
@@ -612,11 +615,11 @@ void State::get_legal_actions_bitboard(){
  * Dispatcher
  *============================================================*/
 void State::get_legal_actions(){
-#ifdef USE_BITBOARD
+    #ifdef USE_BITBOARD
     get_legal_actions_bitboard();
-#else
-    get_legal_actions_naive();
-#endif
+    //#else
+    //get_legal_actions_naive();
+    #endif
 }
 
 
@@ -661,6 +664,7 @@ std::string State::encode_state(){
 
 BaseState* State::create_null_state() const{
     State* s = new State(this->board, 1 - this->player);
+    s->step = this->step + 1;
     s->get_legal_actions();
     return s;
 }
