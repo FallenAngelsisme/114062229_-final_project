@@ -12,7 +12,7 @@
  * KP (King-Piece) Evaluation tables
  *============================================================*/
 
-static const int kp_material[7] = {0, 20, 60, 70, 80, 200, 1000}; //基本棋子價值
+static const int kp_material[7] = {0, 20, 70, 70, 80, 200, 1000}; //基本棋子價值，change
 static const int simple_material[7] = {0, 2, 6, 7, 8, 20, 100};
 
 // Piece-Square Tables (white/player-0 perspective: row 0 = black backrank, row 5 = white backrank)
@@ -63,7 +63,7 @@ static const int pst[6][BOARD_H][BOARD_W] = {
      { 6,  6,  2,  6,  6}},
 };
 
-static const int tropism_w[7] = {0, 0, 3, 3, 2, 5, 0};
+static const int tropism_w[7] = {0, 0, 3, 3, 2, 8, 0};
 
 static int king_tropism(
     int piece_type,
@@ -178,24 +178,29 @@ int State::evaluate(
     int bonus = 0;
 
     // [TODO 1-5] Mobility bonus
-    if(use_mobility){ //use_mobility甚麼時候是true?
+    if(use_mobility){ 
         // Current state already has legal_actions
         int self_mobility = (int)this->legal_actions.size();
 
         // Compute opponent mobility via null state
-        State opp_state(this->board, 1 - this->player); //現在是我的回合，this->legal_actions 已經有我的合法步了，所以要「假裝換對手下」
-        opp_state.get_legal_actions();
-        int oppn_mobility = (int)opp_state.legal_actions.size();
-
-        bonus += 2 * (self_mobility - oppn_mobility);
-
+        //State opp_state(this->board, 1 - this->player); //現在是我的回合，this->legal_actions 已經有我的合法步了，所以要「假裝換對手下」
+        //opp_state.get_legal_actions();
+        //int oppn_mobility = (int)opp_state.legal_actions.size();
+        int oppn_mobility = 0;
+        if(self_mobility > 0){
+            State opp_state(this->board, 1 - this->player);
+            opp_state.get_legal_actions();
+            oppn_mobility = (int)opp_state.legal_actions.size();
+        }
+        bonus += 3 * (self_mobility - oppn_mobility);
+        
         // Capture threat bonus: if any of our moves captures a high-value piece
         for(auto& action : this->legal_actions){
             int tr = (int)action.second.first; //second 和 first是神麼意思?
             int tc = (int)action.second.second;
             int cap = oppn_board[tr][tc]; //我這步走完之後，目標格上有沒有對手的棋子」，有的話就加分。
             if(cap > 0){
-                bonus += simple_material[cap]/4;
+                bonus += kp_material[cap] / 4; //改sim -> kp
             }
         }
     }
@@ -212,8 +217,8 @@ int State::evaluate(
             }
         }
         // 殘局加重比子數的權重
-        int endgame_weight = (this->step - 70) * 2;
-        bonus += (self_end - oppn_end) * endgame_weight;
+        
+        bonus += (self_end - oppn_end) * 5;
     }
     // 殘局時 King 應該主動進攻
     if(this->step >= 75){
@@ -302,6 +307,7 @@ State* State::next_state(const Move& move){
     State* ns = new State(next, opp);
     ns->zobrist_hash = h;
     ns->zobrist_valid = true;
+    ns->step = this->step + 1;
     return ns;
 }
 

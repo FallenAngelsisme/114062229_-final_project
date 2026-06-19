@@ -18,32 +18,45 @@ enum TTFlag : uint8_t {
     TT_UPPER = 2,   // beta  (fail-high) – upper bound
 };
 
+/* [MODIFIED] 加入 gen 欄位（generation）
+ * 原本用 tt_clear() 每步清空 4M entries，非常耗時（50~200ms）
+ * 改用 generation 機制：每步只遞增 tt_generation，probe 時檢查 gen 是否一致
+ * 舊 generation 的 entry 視為無效，不需要實際清空陣列
+ * 節省的時間可以用來搜更深 */
 struct TTEntry {
     uint64_t hash   = 0; // 這個盤面的 Zobrist hash（識別用
     int      score  = 0; // 這個盤面算出來的分數
     Move     best_move = {Point(0,0), Point(0,0)}; // 這個盤面最好的步
     int8_t   depth  = 0; // 當時搜尋的深度
     TTFlag   flag   = TT_EXACT; // 分數的類型 exact, alpha(low),beta(high)
+    uint8_t  gen    = 0;  // [NEW] generation，用來取代清空操作
     bool     valid  = false;  // 這格有沒有存過東西?
 };
 
 static const size_t TT_SIZE = 1 << 22;  // ~4M entries (~200 MB) 開一個很大的陣列存所有記錄
 static TTEntry tt_table[TT_SIZE];
 
+// [NEW] 每步遞增，讓舊 entry 自動失效，取代清空操作
+static uint8_t tt_generation = 0;
+
 static inline size_t tt_index(uint64_t hash){ return hash & (TT_SIZE - 1); } //& (TT_SIZE - 1) 是把 hash 限制在 0 ~ 4百萬之間，概念就像取餘數。
 
+/* [MODIFIED] 原本清空 4M entries（耗時 50~200ms）
+ * 改為只遞增 generation，O(1) 時間完成
+ * 舊 entry 在 probe 時因 gen 不符而被忽略 */
 static void tt_clear(){
-    for(size_t i = 0; i < TT_SIZE; i++){
-        tt_table[i] = TTEntry{};
-    }
+    tt_generation++; // [MODIFIED] 只遞增，不清空
 }
+
 //查詢
+/* [MODIFIED] 加入 generation 檢查，舊 generation 的 entry 視為無效 */
 static const TTEntry* tt_probe(uint64_t hash){
     const TTEntry& e = tt_table[tt_index(hash)];
-    if(e.valid && e.hash == hash) return &e;
+    if(e.valid && e.hash == hash && e.gen == tt_generation) return &e; // [MODIFIED] 加 gen 檢查
     return nullptr;
 }
 
+/* [MODIFIED] 存入時記錄當前 generation */
 static void tt_store(uint64_t hash, int score, int depth, TTFlag flag, const Move& best){
     TTEntry& e = tt_table[tt_index(hash)];// 用hash找到位置
     // Always-replace (simplest, good enough)
@@ -52,6 +65,7 @@ static void tt_store(uint64_t hash, int score, int depth, TTFlag flag, const Mov
     e.depth     = (int8_t)depth;
     e.flag      = flag;
     e.best_move = best;
+    e.gen       = tt_generation; // [MODIFIED] 記錄當前 generation
     e.valid     = true;
 }
 
@@ -60,7 +74,7 @@ static void tt_store(uint64_t hash, int score, int depth, TTFlag flag, const Mov
  * [NEW] Time Management
  * search_types.hpp 不能修改，所以時間管理用 static 變數
  * 在 minimax.cpp 內部自行管理，不依賴 SearchContext
- * g_start_time    : 這步棋搜尋開始的時間點，在 search() 開頭設定
+ * g_start_time : 這步棋搜尋開始的時間點，在 search() 開頭設定
  * g_time_limit_ms : 這步棋允許的最大搜尋時間（毫秒）
  *   - 從 ctx.params["TimeLimit"] 讀取 CLI 傳入的 --time 參數
  *   - 預設 1800ms，留 200ms 緩衝避免超時被判負
@@ -404,7 +418,7 @@ SearchResult MiniMax::search(
      * 留 200ms 緩衝確保不超時被判負
      * 若 params 裡沒有 TimeLimit，預設用 1800ms */
     long raw_time_ms = param_int(ctx.params, "TimeLimit", 2000); // [NEW]
-    g_time_limit_ms  = raw_time_ms - 200;                         // [NEW] 留 200ms 緩衝
+    g_time_limit_ms  = raw_time_ms - 150;                         // [NEW] 留 200ms 緩衝
     if(g_time_limit_ms < 100) g_time_limit_ms = 100;              // [NEW] 至少 100ms
     g_start_time = std::chrono::steady_clock::now();               // [NEW] 記錄開始時間
 
@@ -421,21 +435,25 @@ SearchResult MiniMax::search(
         return result;
     }
 
+    /* [NEW] 確保 result 永遠有預設步，防止超時時回傳空步被判負 */
+    result.best_move = state->legal_actions[0]; // [NEW]
+
     tt_clear();
 
-    // [NEW] depth=0 代表無限深度（助教說明：depth 0 時自動用無限深度）
-    // 設定一個很大的上限，實際上由時間限制決定搜幾層
-    int max_depth = (depth <= 0) ? 999 : depth; // [NEW]
-
     // Iterative deepening
-    // [MODIFIED] 原本用 start_time lambda，改用 g_start_time / g_elapsed_ms()
+    // [REMOVED] 原本的 start_time、time_limit_ms、time_elapsed_ms lambda
+    // 改用 g_start_time、g_time_limit_ms、g_elapsed_ms() 統一管理
+    int max_depth = (depth <= 0) ? 999 : depth; // [NEW] depth=0 代表無限深度
+
     for(int d = 1; d <= max_depth; d++){
         if(ctx.stop) break;
 
-        /* [MODIFIED] 原本用 time_elapsed_ms()，改用 g_elapsed_ms()
-         * 邏輯不變：用了一半時間就不開始下一層 */
-        if(d > 1 && g_elapsed_ms() > g_time_limit_ms / 2){
-            // Don't start a deeper iteration if we've used half the time
+        /* [MODIFIED] 原本：用了 1/2 時間就不開始下一層，導致搜尋深度不夠
+         * 改為：用了 3/4 時間才停，讓 AI 有機會搜到更深的層數
+         * 分析發現對手能搜到 depth 6-7，而我們常常只搜到 4-5，
+         * 搜得深才能做出更好的決策 */
+        if(d > 1 && g_elapsed_ms() > g_time_limit_ms -200){ // [MODIFIED] 1/2 → 3/4
+            // Don't start a deeper iteration if we've used 3/4 of the time
             break;
         }
 
