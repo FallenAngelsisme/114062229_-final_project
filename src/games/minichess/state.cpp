@@ -21,46 +21,46 @@ static const int simple_material[7] = {0, 2, 6, 7, 8, 20, 100};
 static const int pst[6][BOARD_H][BOARD_W] = {
     // Pawn: reward advancement
     {{ 0,  0,  0,  0,  0},   // row 0 (promotion row for white, never reached as pawn)
-     {15, 15, 15, 15, 15},   // row 1 (one step from promotion)
-     { 4,  6, 10,  6,  4},   // row 2
-     { 2,  4,  6,  4,  2},   // row 3
-     { 0,  2,  2,  2,  0},   // row 4 (starting row for white pawns)
+     {30, 35, 40, 35, 30},   // row 1 (one step from promotion) - 顯著加強衝兵威脅
+     {10, 14, 18, 14, 10},   // row 2
+     { 4,  8, 12,  8,  4},   // row 3
+     { 0,  2,  4,  2,  0},   // row 4 (starting row for white pawns)
      { 0,  0,  0,  0,  0}},  // row 5 (white backrank)
     // Rook
-    {{ 2,  2,  2,  2,  2},
-     { 4,  4,  4,  4,  4},
-     { 0,  0,  2,  0,  0},
-     { 0,  0,  2,  0,  0},
-     { 0,  0,  2,  0,  0},
-     { 0,  0,  0,  0,  0}},
+    {{ 4,  6,  6,  6,  4},
+     { 6,  8,  8,  8,  6},
+     { 2,  4,  4,  4,  2},
+     { 0,  2,  4,  2,  0},
+     { 0,  2,  2,  2,  0},
+     { 0,  0,  2,  0,  0}},
     // Knight: prefer center
-    {{-4, -2,  0, -2, -4},
-     {-2,  2,  4,  2, -2},
-     { 0,  4,  6,  4,  0},
-     { 0,  4,  6,  4,  0},
-     {-2,  2,  4,  2, -2},
-     {-4, -2,  0, -2, -4}},
+    {{-6, -4, -4, -4, -6},
+     {-4,  2,  4,  2, -4},
+     {-2,  6,  8,  6, -2},
+     {-2,  6,  8,  6, -2},
+     {-4,  2,  4,  2, -4},
+     {-6, -4, -4, -4, -6}},
     // Bishop: prefer center diagonals
-    {{-2,  0,  0,  0, -2},
-     { 0,  3,  4,  3,  0},
-     { 0,  4,  4,  4,  0},
-     { 0,  4,  4,  4,  0},
-     { 0,  3,  4,  3,  0},
-     {-2,  0,  0,  0, -2}},
+    {{-4, -2, -2, -2, -4},
+     {-2,  4,  4,  4, -2},
+     { 0,  6,  6,  6,  0},
+     { 0,  6,  6,  6,  0},
+     {-2,  4,  4,  4, -2},
+     {-4, -2, -2, -2, -4}},
     // Queen: prefer center
     {{-2,  0,  2,  0, -2},
-     { 0,  2,  4,  2,  0},
      { 0,  4,  6,  4,  0},
+     { 2,  6,  8,  6,  2},
+     { 2,  6,  8,  6,  2},
      { 0,  4,  6,  4,  0},
-     { 0,  2,  4,  2,  0},
      {-2,  0,  2,  0, -2}},
     // King: hide in endgame, stay on backrank early
-    {{-8, -8, -8, -8, -8},
-     {-4, -4, -4, -4, -4},
-     {-4, -4, -4, -4, -4},
+    {{-12,-12,-12,-12,-12},
+     {-8, -8, -8, -8, -8},
+     {-6, -6, -6, -6, -6},
      {-4, -4, -4, -4, -4},
      { 4,  4,  0,  4,  4},
-     { 6,  6,  2,  6,  6}},
+     { 8,  8,  4,  8,  8}},
 };
 
 static const int tropism_w[7] = {0, 0, 3, 3, 2, 8, 0};
@@ -130,6 +130,18 @@ int State::evaluate(
                     if(oppn_kr >= 0 && sp != 6){ //為甚麼看opp king的r?
                         self_score += king_tropism(sp, r, c, oppn_kr, oppn_kc);
                     }
+                    
+                    // [ADDITIONAL STRATEGY] 車控制開放線與半開放線加分
+                    if(sp == 2){
+                        bool self_pawn_in_col = false;
+                        bool opp_pawn_in_col = false;
+                        for(int row_check=0; row_check<BOARD_H; row_check++){
+                            if(self_board[row_check][c] == 1) self_pawn_in_col = true;
+                            if(oppn_board[row_check][c] == 1) opp_pawn_in_col = true;
+                        }
+                        if(!self_pawn_in_col && !opp_pawn_in_col) self_score += 8; // 全開放線
+                        else if(!self_pawn_in_col) self_score += 4;                // 半開放線
+                    }
                 }
 
                 int op = oppn_board[r][c];
@@ -138,6 +150,18 @@ int State::evaluate(
                     oppn_score += kp_material[op] + pst[op-1][opp_pst_row][c];
                     if(self_kr >= 0 && op != 6){ //oppn_kr >= 0：確認敵方 King 還在棋盤上（沒有被吃掉）sp != 6：我方 King 不計算 tropism（King 不該冒險去靠近敵王）
                         oppn_score += king_tropism(op, r, c, self_kr, self_kc);
+                    }
+                    
+                    // [ADDITIONAL STRATEGY] 敵方車開放線評估
+                    if(op == 2){
+                        bool self_pawn_in_col = false;
+                        bool opp_pawn_in_col = false;
+                        for(int row_check=0; row_check<BOARD_H; row_check++){
+                            if(self_board[row_check][c] == 1) self_pawn_in_col = true;
+                            if(oppn_board[row_check][c] == 1) opp_pawn_in_col = true;
+                        }
+                        if(!self_pawn_in_col && !opp_pawn_in_col) oppn_score += 8;
+                        else if(!opp_pawn_in_col) oppn_score += 4;
                     }
                 }
             }
@@ -150,15 +174,15 @@ int State::evaluate(
                     // player=0: promotes at row 0; distance = r
                     // player=1: promotes at row BOARD_H-1; distance = BOARD_H-1-r
                     int dist = (this->player == 0) ? r : (BOARD_H - 1 - r);
-                    if(dist == 1) self_score += 60; //在幾步就可升變
-                    else if(dist == 2) self_score += 30;
-                    else if(dist == 3) self_score += 10;
+                    if(dist == 1) self_score += 80; //在幾步就可升變 (微調提高權重)
+                    else if(dist == 2) self_score += 40;
+                    else if(dist == 3) self_score += 15;
                 }
                 if(oppn_board[r][c] == 1){
                     int dist = (this->player == 1) ? r : (BOARD_H - 1 - r);
-                    if(dist == 1) oppn_score += 60;
-                    else if(dist == 2) oppn_score += 30;
-                    else if(dist == 3) oppn_score += 10;
+                    if(dist == 1) oppn_score += 80;
+                    else if(dist == 2) oppn_score += 40;
+                    else if(dist == 3) oppn_score += 15;
                 }
             }
         }
@@ -192,13 +216,13 @@ int State::evaluate(
             opp_state.get_legal_actions();
             oppn_mobility = (int)opp_state.legal_actions.size();
         }
-        bonus += 3 * (self_mobility - oppn_mobility);
+        bonus += 4 * (self_mobility - oppn_mobility); // 微調移動力比重
         
         // Capture threat bonus: if any of our moves captures a high-value piece
         for(auto& action : this->legal_actions){
             int tr = (int)action.second.first; //second 和 first是神麼意思?
             int tc = (int)action.second.second;
-            int cap = oppn_board[tr][tc]; //我這步走完之後，目標格上有沒有對手的棋子」，有的話就加分。
+            int cap = oppn_board[tr][tc]; //我這步走完之後，目標格上有有沒有對手的棋子」，有的話就加分。
             if(cap > 0){
                 bonus += kp_material[cap] / 4; //改sim -> kp
             }
@@ -218,7 +242,7 @@ int State::evaluate(
         }
         // 殘局加重比子數的權重
         
-        bonus += (self_end - oppn_end) * 5;
+        bonus += (self_end - oppn_end) * 6; // 稍微增強殘局子力權重
     }
     /* [MODIFIED] 殘局時 King 應該主動進攻
      * 原本 step >= 75 才啟動，距結局只剩 25 步，太晚了
