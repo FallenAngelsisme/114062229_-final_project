@@ -91,7 +91,7 @@ int State::evaluate(
 
     // [TODO 1-1] Win/loss terminal
     if(this->game_state == WIN){
-        return P_MAX; //P_MAX 在 base_state.hpp 定義，值是 100000。
+        return P_MAX; //P_MAX 在 base_state.hpp 定義，值是 100000。P_MAX 是甚麼
     }
 
     auto self_board  = this->board.board[this->player];
@@ -127,7 +127,7 @@ int State::evaluate(
                     // player=1 (black): mirror row
                     int pst_row = (this->player == 0) ? r : (BOARD_H - 1 - r);
                     self_score += kp_material[sp] + pst[sp-1][pst_row][c];
-                    if(oppn_kr >= 0 && sp != 6){ //為甚麼看opp king的r?
+                    if(oppn_kr >= 0 && sp != 6){ 
                         self_score += king_tropism(sp, r, c, oppn_kr, oppn_kc);
                     }
                     
@@ -152,7 +152,7 @@ int State::evaluate(
                         oppn_score += king_tropism(op, r, c, self_kr, self_kc);
                     }
                     
-                    // [ADDITIONAL STRATEGY] 敵方車開放線評估
+                    // [ADDITIONAL STRATEGY] 敵方車開放線評估 ?
                     if(op == 2){
                         bool self_pawn_in_col = false;
                         bool opp_pawn_in_col = false;
@@ -220,7 +220,7 @@ int State::evaluate(
         
         // Capture threat bonus: if any of our moves captures a high-value piece
         for(auto& action : this->legal_actions){
-            int tr = (int)action.second.first; //second 和 first是神麼意思?
+            int tr = (int)action.second.first; //second 和 first
             int tc = (int)action.second.second;
             int cap = oppn_board[tr][tc]; //我這步走完之後，目標格上有有沒有對手的棋子」，有的話就加分。
             if(cap > 0){
@@ -245,9 +245,7 @@ int State::evaluate(
         bonus += (self_end - oppn_end) * 6; // 稍微增強殘局子力權重
     }
     /* [MODIFIED] 殘局時 King 應該主動進攻
-     * 原本 step >= 75 才啟動，距結局只剩 25 步，太晚了
-     * 改為 step >= 55 開始，並隨 step 漸進式加強
-     * step=55 時 king_bonus=0, step=65 時 king_bonus=2, step=85 時 king_bonus=6 */
+    */
     if(this->step >= 55){
         if(self_kr >= 0 && oppn_kr >= 0){
             int king_dist = std::abs(self_kr - oppn_kr) +
@@ -639,11 +637,11 @@ void State::get_legal_actions_bitboard(){
  * Dispatcher
  *============================================================*/
 void State::get_legal_actions(){
-    #ifdef USE_BITBOARD
+    //#ifdef USE_BITBOARD
     get_legal_actions_bitboard();
     //#else
     //get_legal_actions_naive();
-    #endif
+    //#endif
 }
 
 

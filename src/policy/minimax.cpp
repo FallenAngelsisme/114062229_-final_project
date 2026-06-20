@@ -37,7 +37,7 @@ static const size_t TT_SIZE = 1 << 22;  // ~4M entries (~200 MB) 開一個很大
 static TTEntry tt_table[TT_SIZE];
 
 // [NEW] 每步遞增，讓舊 entry 自動失效，取代清空操作
-static uint32_t tt_generation = 0;
+static uint32_t tt_generation = 0; //第幾步，不相等就代表這是「上一步棋」留下的舊資料，視為無效、不採用。
 
 static inline size_t tt_index(uint64_t hash){ return hash & (TT_SIZE - 1); } //& (TT_SIZE - 1) 是把 hash 限制在 0 ~ 4百萬之間，概念就像取餘數。
 
@@ -89,7 +89,7 @@ static std::chrono::steady_clock::time_point g_start_time; // [NEW]
 static long g_time_limit_ms = 1800;                         // [NEW]
 
 // [NEW] 回傳已經過的毫秒數，供 Iterative Deepening 判斷要不要開始下一層
-static long g_elapsed_ms(){
+static long g_elapsed_ms(){ //這是甚麼?用在哪?
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - g_start_time).count();
 }
@@ -104,23 +104,23 @@ static constexpr int MAX_PLY_TRACK = 128;
 static Move g_killers[MAX_PLY_TRACK][2];
 static int g_history[2][BOARD_H][BOARD_W][BOARD_H][BOARD_W];
 
-static inline bool is_null_move(const Move& mv){
+static inline bool is_null_move(const Move& mv){ //沒用到
     return mv.first.first == 0 && mv.first.second == 0 && mv.second.first == 0 && mv.second.second == 0;
 }
 
-static inline void clear_move_ordering_tables(){
-    std::memset(g_killers, 0, sizeof(g_killers));
+static inline void clear_move_ordering_tables(){//這是甚麼?
+    std::memset(g_killers, 0, sizeof(g_killers));//g_killers「每一層深度 (ply)」記錄兩個曾經造成剪枝的「殺手步」(killer move)
     std::memset(g_history, 0, sizeof(g_history));
 }
 
-static inline void add_killer(int ply, const Move& mv){
+static inline void add_killer(int ply, const Move& mv){ //KILLER可以幹嘛?
     if(ply < 0 || ply >= MAX_PLY_TRACK) return;
     if(mv == g_killers[ply][0]) return;
     g_killers[ply][1] = g_killers[ply][0];
     g_killers[ply][0] = mv;
 }
 
-static inline void add_history(int side, const Move& mv, int depth){
+static inline void add_history(int side, const Move& mv, int depth){ // 這可以幹嘛?
     int bonus = depth * depth;
     if(bonus > 256) bonus = 256;
     int& slot = g_history[side][mv.first.first][mv.first.second][mv.second.first][mv.second.second];
@@ -138,7 +138,7 @@ static inline bool is_quiet_move(const Move& mv, const State* state){
     int mover = state->board.board[state->player][fr][fc];
     bool promo = (mover == 1) && ((state->player == 0 && tr == 0) || (state->player == 1 && tr == BOARD_H - 1));
     return captured == 0 && !promo;
-}
+} // 不吃，不升，用在killer
 
 
 /* ============================================================
@@ -158,7 +158,7 @@ static int move_score(const Move& mv, const State* state, const Move& tt_move, i
     // TT move first
     if(mv == tt_move) return 1000000; //上一步
 
-    if(ply >= 0 && ply < MAX_PLY_TRACK){
+    if(ply >= 0 && ply < MAX_PLY_TRACK){ //為什這這麼前面? 普通步也是剪枝就在後面?
         if(mv == g_killers[ply][0]) return 900000;
         if(mv == g_killers[ply][1]) return 850000;
     }
@@ -230,7 +230,7 @@ static int quiescence(
         int tr = (int)mv.second.first, tc = (int)mv.second.second;
         int captured = state->board.board[opp][tr][tc];
         int mover    = state->board.board[state->player][(int)mv.first.first][(int)mv.first.second];
-        bool is_promo = (mover==1) && ((state->player==0 && tr==0)||(state->player==1 && tr==BOARD_H-1));
+        bool is_promo = (mover==1) && ((state->player==0 && tr==0)||(state->player==1 && tr==BOARD_H-1)); 
         if(captured || is_promo) noisy.push_back(mv);
     }
 
@@ -361,7 +361,7 @@ static int pvs(
             first = false;//
             //對比第一個 move 用的完整視窗
         } else {
-            // Null-window search 極窄視窗 甚麼時候會用到?
+            // Null-window search 極窄視窗 
             int null_alpha = same ? alpha : -(alpha + 1);//[-(alpha+1), -alpha] 寬度只有 1，非常快。
             int null_beta  = same ? (alpha + 1) : -alpha;
 
@@ -384,7 +384,7 @@ static int pvs(
         if(raw > alpha){
             alpha = raw;
         }
-        if(alpha >= beta){
+        if(alpha >= beta){ //剪枝
             if(is_quiet_move(mv, state)){
                 add_killer(ply, mv);
                 add_history(state->player, mv, depth);
@@ -434,7 +434,7 @@ int MiniMax::eval_ctx(
     int rep_score;
     if(state->check_repetition(history, rep_score)) return rep_score;
     history.push(state->hash());
-    //沒到底呢?
+    
     if(depth <= 0){
         int score = state->evaluate(p.use_kp_eval, p.use_eval_mobility, &history);
         history.pop(state->hash());
@@ -475,10 +475,7 @@ SearchResult MiniMax::search(
     GameHistory& history,
     SearchContext& ctx
 ){
-    /* [NEW] 從 ctx.params 讀取 CLI 傳入的時間限制
-     * CLI --time 2000 會把 2000 存進 ctx.params["TimeLimit"]
-     * 留 200ms 緩衝確保不超時被判負
-     * 若 params 裡沒有 TimeLimit，預設用 1800ms */
+    
     long raw_time_ms = param_int(ctx.params, "TimeLimit", 2000); // [NEW]
     long capped_time_ms = std::min(raw_time_ms, 1900L);
     g_time_limit_ms  = capped_time_ms - 10;                       // [NEW] 硬上限 1900ms，保留緩衝
@@ -507,21 +504,18 @@ SearchResult MiniMax::search(
     // Iterative deepening
     // [REMOVED] 原本的 start_time、time_limit_ms、time_elapsed_ms lambda
     // 改用 g_start_time、g_time_limit_ms、g_elapsed_ms() 統一管理
-    int max_depth = (depth <= 0) ? 999 : depth; // [NEW] depth=0 代表無限深度
+    int max_depth = (depth <= 0) ? 999 : depth; // [NEW] depth=0 代表無限深度 怎麼有999?
 
     for(int d = 1; d <= max_depth; d++){
         if(ctx.stop) break;
 
-        /* [MODIFIED] 原本：用了 1/2 時間就不開始下一層，導致搜尋深度不夠
-         * 改為：用了 3/4 時間才停，讓 AI 有機會搜到更深的層數
-         * 分析發現對手能搜到 depth 6-7，而我們常常只搜到 4-5，
-         * 搜得深才能做出更好的決策 */
+       
         if(d > 1 && g_elapsed_ms() > g_time_limit_ms - 10){
-            // Don't start a deeper iteration if we've used 3/4 of the time
+            // Don't start a deeper iteration if we've used time
             break;
         }
 
-        ctx.seldepth = 0;
+        ctx.seldepth = 0; //SELFSEPTH 是什麼?
         int best_score = result.score;
         Move best_move = state->legal_actions[0];
 
@@ -537,7 +531,7 @@ SearchResult MiniMax::search(
         int total_moves = (int)root_moves.size();
         bool search_aborted = false;
 
-        auto search_root_window = [&](int alpha, int beta, Move& out_move, int& out_score) -> bool {
+        auto search_root_window = [&](int alpha, int beta, Move& out_move, int& out_score) -> bool { //為什麼這裡要再巡一次視窗?
             int root_alpha = alpha;
             int root_beta  = beta;
             int move_index = 0;
@@ -576,7 +570,7 @@ SearchResult MiniMax::search(
                 }
                 if(raw > root_alpha){
                     root_alpha = raw;
-                    if(p.report_partial && ctx.on_root_update){
+                    if(p.report_partial && ctx.on_root_update){ //這裡是甚麼? 這些含是在幹嘛?
                         ctx.on_root_update({out_move, out_score, d, move_index+1, total_moves});
                     }
                 }
@@ -587,7 +581,7 @@ SearchResult MiniMax::search(
             }
             return !ctx.stop;
         };
-
+        // 這裡在幹嘛?
         if(d == 1){
             if(!search_root_window(M_MAX, P_MAX, best_move, best_score)){
                 search_aborted = true;
@@ -655,7 +649,7 @@ ParamMap MiniMax::default_params(){
     return {
         {"UseKPEval",       "true"},
         {"UseEvalMobility", "true"},
-        {"ReportPartial",   "true"},
+        {"ReportPartial",   "true"}, //ReportPartial是甚麼?
     };
 }
 
